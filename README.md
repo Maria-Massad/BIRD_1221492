@@ -30,13 +30,4 @@ Routing is driven by a 32-bit cfg sideband word.
 - coverage/func_coverage : functional coverage report
 - test_plan/    : test_plan.xlsx
 
-## Team
 
-- Member 1: Interface + local tests + local scoreboard
-- Member 2: Driver + sequences + remote scoreboard (CRC16)
-- Member 3: Monitors + agent + coverage + drop tests
-- Member 4: Env + package + base test + reset/stress + reporting
-
-## Build and run
-
-To be completed once the run setup in sim/ is in place.
