@@ -1,0 +1,37 @@
+# ---- Synopsys VCS build artifacts ----
+simv
+simv.daidir/
+csrc/
+*.daidir/
+.vcs_lib/
+vc_hdrs.h
+ucli.key
+vcs.log
+
+# ---- Simulation logs & dumps ----
+*.log
+*.vpd
+*.vcd
+*.fsdb
+*.wlf
+novas*
+verdiLog/
+DVEfiles/
+
+# ---- Coverage databases (keep exported reports, ignore raw DBs) ----
+*.vdb/
+simv.cm/
+cm.log
+coverage/**/*.vdb/
+
+# ---- Questa / ModelSim (in case anyone uses it) ----
+work/
+transcript
+*.mti
+*.wlf
+
+# ---- Editor / OS junk ----
+*.swp
+*~
+.DS_Store
+*.bak
