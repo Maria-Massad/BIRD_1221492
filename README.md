@@ -28,6 +28,6 @@ Routing is driven by a 32-bit cfg sideband word.
 - sim/          : run scripts / filelist / Makefile
 - coverage/code_coverage : code coverage report
 - coverage/func_coverage : functional coverage report
-- test_plan/    : test_plan.xlsx
+- test_plan/    : TESTPLAN.xlsx
 
 
