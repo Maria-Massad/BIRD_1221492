@@ -1,91 +1,122 @@
-`ifndef BIRD_SEQ_ITEM_SV
-`define BIRD_SEQ_ITEM_SV
+`ifndef BIRD_DRIVE_SV
+`define BIRD_DRIVE_SV
 
-class bird_seq_item;
+`include "bird_if.sv"
+`include "bird_pkg.sv"
 
-  bit traffic_type;
+import bird_pkg::* ;
 
-  bit [6:0] rsvd_7_1;
-  byte unsigned payload_len;
 
-  bit [4:0] frag_num;
-  bit [2:0] rsvd_23_21;
 
-  bit [4:0] seq_num;
-  bit [2:0] rsvd_31_29;
 
-  byte unsigned data[$];
+class bird_driver;
 
-  function new();
-    traffic_type = 1'b0;
-    rsvd_7_1     = 7'd0;
-    payload_len  = 8'd0;
-    frag_num     = 5'd1;
-    rsvd_23_21   = 3'd0;
-    seq_num      = 5'd1;
-    rsvd_31_29   = 3'd0;
-    data.delete();
+ virtual bird_if vif;
+ mailbox #(bird_packet) mbx;
+ 
+ 
+  function new(virtual bird_if vif, mailbox #(bird_packet) mbx);
+    this.vif = vif;
+    this.mbx = mbx;
   endfunction
-
-  function bit [31:0] get_cfg();
-    get_cfg = {
-      rsvd_31_29,
-      seq_num,
-      rsvd_23_21,
-      frag_num,
-      payload_len,
-      rsvd_7_1,
-      traffic_type
-    };
-  endfunction
-
-  function automatic bit [15:0] calc_crc16(input byte unsigned payload_q[$]);
-    bit [15:0] crc;
-    int i;
-    int j;
-
-    crc = 16'hFFFF;
-
-    foreach (payload_q[i]) begin
-      crc ^= {8'h00, payload_q[i]};
-
-      for (j = 0; j < 8; j++) begin
-        if (crc[0])
-          crc = (crc >> 1) ^ 16'hA001;
-        else
-          crc = crc >> 1;
-      end
+  
+  task reset(int unsigned cycles = 5);
+    
+    vif.driver_cb.rst_n      <= 0;
+    vif.driver_cb.in_vld     <= 0;
+    vif.driver_cb.data_in    <= 0;
+    vif.driver_cb.cfg        <= 0;
+    vif.driver_cb.local_rdy  <= 1;  // consumer always ready by default
+    vif.driver_cb.remote_rdy <= 1;  // consumer always ready by default
+ 
+    // hold reset for N clock cycles
+    repeat (cycles) @(vif.driver_cb);
+ 
+    // release reset
+    vif.driver_cb.rst_n <= 1;
+ 
+    // wait 2 more cycles for DUT to stabilize
+    repeat (2) @(vif.driver_cb);
+ 
+    $display("[DRIVER] Reset done");
+  endtask
+  
+  
+  task run();
+    bird_packet pkt;
+    forever begin
+      // wait for a packet from the sequence
+      mbx.get(pkt); //block here until the pkt available
+      send_fragment(pkt);  // send it to the DUT
     end
-
-    return crc;
-  endfunction
-
-  function void get_input_stream(ref byte unsigned stream[$]);
-    bit [15:0] crc_value;
-
-    stream.delete();
-
-    foreach (data[i]) begin
-      stream.push_back(data[i]);
+  endtask
+  
+  
+  // send_fragment()
+ 
+  // A fragment = payload bytes + 2 CRC bytes
+  // cfg is driven before the first byte and held stable
+ 
+  task send_fragment(bird_packet pkt);
+ 
+    //1. put cfg on the wire
+    // cfg must be valid on the same cycle as the first payload byte
+    vif.driver_cb.cfg <= pkt.cfg_word;
+ 
+    // 2.send each payload byte 
+    foreach (pkt.payload[i]) begin
+      vif.driver_cb.in_vld  <= 1;
+      vif.driver_cb.data_in <= pkt.payload[i];
+      @(vif.driver_cb);
+      // in_rdy is always 1 in this DUT so no need to wait
+      // but we check anyway for correctness
+      while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
     end
+ 
+    // 3. Step 3: send CRC high byte 
+    vif.driver_cb.in_vld  <= 1;
+    vif.driver_cb.data_in <= pkt.crc16[15:8];
+    @(vif.driver_cb);
+    while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
+ 
+    // 4. send CRC low byte
+    vif.driver_cb.in_vld  <= 1;
+    vif.driver_cb.data_in <= pkt.crc16[7:0];
+    @(vif.driver_cb);
+    while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
+ 
+    // 5. deassert valid 
+    vif.driver_cb.in_vld  <= 0;
+    vif.driver_cb.data_in <= 0;
+    @(vif.driver_cb);
+ 
+    `ifdef DEBUG
+      pkt.print("DRIVER");
+    `endif
+ 
+  endtask
 
-    crc_value = calc_crc16(data);
+  // set_local_rdy() — control local consumer backpressure
+ 
+  task set_local_rdy(input bit val);
+    vif.driver_cb.local_rdy <= val;
+    @(vif.driver_cb);
+  endtask
+ 
+  // set_remote_rdy() — control remote consumer backpressure
 
-    stream.push_back(crc_value[15:8]);
-    stream.push_back(crc_value[7:0]);
-  endfunction
+  task set_remote_rdy(input bit val);
+    vif.driver_cb.remote_rdy <= val;
+    @(vif.driver_cb);
+  endtask
+ 
+  
+  // wait_cycles() — helper to idle for N cycles
 
-  function string convert2string();
-    return $sformatf(
-      "traffic_type=%0b payload_len=%0d frag_num=%0d seq_num=%0d cfg=0x%08h data_size=%0d",
-      traffic_type,
-      payload_len,
-      frag_num,
-      seq_num,
-      get_cfg(),
-      data.size()
-    );
-  endfunction
-
-endclass : bird_seq_item
-`endif // BIRD_SEQ_ITEM_SV
+  task wait_cycles(int unsigned n);
+    repeat (n) @(vif.driver_cb);
+  endtask
+ 
+endclass : bird_driver
+ 
+`endif
