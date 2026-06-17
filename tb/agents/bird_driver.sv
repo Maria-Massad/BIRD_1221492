@@ -1,106 +1,91 @@
-//=============================================================================
-// Driver behavior:
-//   - Holds cfg stable for the full fragment.
-//   - Sends payload bytes first.
-//   - Sends CRC16 immediately after payload, MSB then LSB.
-//   - Uses valid/ready handshake.
-//   - When in_vld=1 and in_rdy=0, keeps in_vld, data_in, and cfg stable.
-//
-// NOTE:
-//   This driver matches the provided bird_if.sv clocking block name:
-//     driver_cb
-//=============================================================================
+`ifndef BIRD_SEQ_ITEM_SV
+`define BIRD_SEQ_ITEM_SV
 
-`ifndef BIRD_DRIVER_SV
-`define BIRD_DRIVER_SV
+class bird_seq_item;
 
-class bird_driver extends uvm_driver #(bird_seq_item);
+  bit traffic_type;
 
-  `uvm_component_utils(bird_driver)
+  bit [6:0] rsvd_7_1;
+  byte unsigned payload_len;
 
-  virtual bird_if vif;
+  bit [4:0] frag_num;
+  bit [2:0] rsvd_23_21;
 
-  function new(string name = "bird_driver", uvm_component parent = null);
-    super.new(name, parent);
+  bit [4:0] seq_num;
+  bit [2:0] rsvd_31_29;
+
+  byte unsigned data[$];
+
+  function new();
+    traffic_type = 1'b0;
+    rsvd_7_1     = 7'd0;
+    payload_len  = 8'd0;
+    frag_num     = 5'd1;
+    rsvd_23_21   = 3'd0;
+    seq_num      = 5'd1;
+    rsvd_31_29   = 3'd0;
+    data.delete();
   endfunction
 
-  function void build_phase(uvm_phase phase);
-    super.build_phase(phase);
-
-    if (!uvm_config_db#(virtual bird_if)::get(this, "", "vif", vif)) begin
-      `uvm_fatal("BIRD_DRV", "Virtual interface 'vif' not set for bird_driver")
-    end
+  function bit [31:0] get_cfg();
+    get_cfg = {
+      rsvd_31_29,
+      seq_num,
+      rsvd_23_21,
+      frag_num,
+      payload_len,
+      rsvd_7_1,
+      traffic_type
+    };
   endfunction
 
-  task run_phase(uvm_phase phase);
-    bird_seq_item req;
+  function automatic bit [15:0] calc_crc16(input byte unsigned payload_q[$]);
+    bit [15:0] crc;
+    int i;
+    int j;
 
-    drive_idle();
-    wait_for_reset_deassert();
+    crc = 16'hFFFF;
 
-    forever begin
-      seq_item_port.get_next_item(req);
+    foreach (payload_q[i]) begin
+      crc ^= {8'h00, payload_q[i]};
 
-      `uvm_info("BIRD_DRV",
-                $sformatf("Driving item: %s", req.convert2string()),
-                UVM_MEDIUM)
-
-      drive_fragment(req);
-
-      seq_item_port.item_done();
-    end
-  endtask
-
-  task drive_idle();
-    vif.driver_cb.in_vld  <= 1'b0;
-    vif.driver_cb.data_in <= 8'h00;
-    vif.driver_cb.cfg     <= 32'h0000_0000;
-
-    // Keep output consumers ready during simple Phase 1 bring-up.
-    // This prevents DUT output queues from stalling.
-    vif.driver_cb.local_rdy  <= 1'b1;
-    vif.driver_cb.remote_rdy <= 1'b1;
-  endtask
-
-  task wait_for_reset_deassert();
-    while (vif.rst_n !== 1'b1) begin
-      @(vif.driver_cb);
+      for (j = 0; j < 8; j++) begin
+        if (crc[0])
+          crc = (crc >> 1) ^ 16'hA001;
+        else
+          crc = crc >> 1;
+      end
     end
 
-    @(vif.driver_cb);
-  endtask
+    return crc;
+  endfunction
 
-  task drive_fragment(bird_seq_item req);
-    bit [31:0]    cfg_word;
-    byte unsigned stream[$];
+  function void get_input_stream(ref byte unsigned stream[$]);
+    bit [15:0] crc_value;
 
-    cfg_word = req.get_cfg();
-    req.get_input_stream(stream);
+    stream.delete();
 
-    foreach (stream[i]) begin
-      drive_byte_with_backpressure(stream[i], cfg_word);
+    foreach (data[i]) begin
+      stream.push_back(data[i]);
     end
 
-    drive_idle();
+    crc_value = calc_crc16(data);
 
-    // One idle cycle between fragments/items.
-    @(vif.driver_cb);
-  endtask
+    stream.push_back(crc_value[15:8]);
+    stream.push_back(crc_value[7:0]);
+  endfunction
 
-  task drive_byte_with_backpressure(byte unsigned data_byte,
-                                    bit [31:0] cfg_word);
+  function string convert2string();
+    return $sformatf(
+      "traffic_type=%0b payload_len=%0d frag_num=%0d seq_num=%0d cfg=0x%08h data_size=%0d",
+      traffic_type,
+      payload_len,
+      frag_num,
+      seq_num,
+      get_cfg(),
+      data.size()
+    );
+  endfunction
 
-    vif.driver_cb.in_vld  <= 1'b1;
-    vif.driver_cb.data_in <= data_byte;
-    vif.driver_cb.cfg     <= cfg_word;
-
-    @(vif.driver_cb);
-
-    while (vif.driver_cb.in_rdy !== 1'b1) begin
-      @(vif.driver_cb);
-    end
-  endtask
-
-endclass : bird_driver
-
-`endif // BIRD_DRIVER_SV
+endclass : bird_seq_item
+`endif // BIRD_SEQ_ITEM_SV
