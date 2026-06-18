@@ -4,8 +4,8 @@
 `include "bird_driver.sv"
 
 `include "bird_sanity_test.sv"
-//`include "bird_drop_test_a.sv"
-//`include "bird_backpressure_test.sv"
+`include "bird_drop_test_a.sv"
+`include "bird_backpressure_test.sv"
 
 import bird_pkg::*;
 
@@ -76,8 +76,10 @@ module bird_tb;
  
    //tests
     run_sanity_test();
+   
+    run_backpressure_test();
     run_drop_test_a();
-    //run_backpressure_test();
+    
  
     // give DUT time to finish any in-flight packets
     drv.wait_cycles(20);
@@ -89,27 +91,31 @@ module bird_tb;
     $finish;
   end
   // sanity test put pkt in mail box
+  
   task run_sanity_test();
-    bird_sanity_test t = new(dut_if, mbx);
+    bird_sanity_test t;
+    t = new(dut_if, mbx);
     $display("\n--- Running: bird_sanity_test ---");
     t.run();
     drv.wait_cycles(10);
   endtask
   
-  //drop test
   task run_drop_test_a();
-    bird_drop_test_a t = new(dut_if, mbx);
+    bird_drop_test_a t;
+    drv.reset(5);
+    t = new(dut_if, mbx);
     $display("\n--- Running: bird_drop_test_a ---");
     t.run();
     drv.wait_cycles(10);
   endtask
-  /*
+  
   //back pressure test
   task run_backpressure_test();
-    bird_backpressure_test t = new(dut_if, mbx);
+    bird_backpressure_test t;
+    drv.wait_cycles(30);
+    t = new(dut_if, mbx);
     $display("\n--- Running: bird_backpressure_test ---");
     t.run();
     drv.wait_cycles(10);
-  endtask */
-
+  endtask
 endmodule : bird_tb

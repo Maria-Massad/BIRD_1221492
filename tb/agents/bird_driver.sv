@@ -1,106 +1,122 @@
-//=============================================================================
-// Driver behavior:
-//   - Holds cfg stable for the full fragment.
-//   - Sends payload bytes first.
-//   - Sends CRC16 immediately after payload, MSB then LSB.
-//   - Uses valid/ready handshake.
-//   - When in_vld=1 and in_rdy=0, keeps in_vld, data_in, and cfg stable.
-//
-// NOTE:
-//   This driver matches the provided bird_if.sv clocking block name:
-//     driver_cb
-//=============================================================================
+`ifndef BIRD_DRIVE_SV
+`define BIRD_DRIVE_SV
 
-`ifndef BIRD_DRIVER_SV
-`define BIRD_DRIVER_SV
+`include "bird_if.sv"
+`include "bird_pkg.sv"
 
-class bird_driver extends uvm_driver #(bird_seq_item);
+import bird_pkg::* ;
 
-  `uvm_component_utils(bird_driver)
 
-  virtual bird_if vif;
 
-  function new(string name = "bird_driver", uvm_component parent = null);
-    super.new(name, parent);
+
+class bird_driver;
+
+ virtual bird_if vif;
+ mailbox #(bird_packet) mbx;
+ 
+ 
+  function new(virtual bird_if vif, mailbox #(bird_packet) mbx);
+    this.vif = vif;
+    this.mbx = mbx;
   endfunction
-
-  function void build_phase(uvm_phase phase);
-    super.build_phase(phase);
-
-    if (!uvm_config_db#(virtual bird_if)::get(this, "", "vif", vif)) begin
-      `uvm_fatal("BIRD_DRV", "Virtual interface 'vif' not set for bird_driver")
-    end
-  endfunction
-
-  task run_phase(uvm_phase phase);
-    bird_seq_item req;
-
-    drive_idle();
-    wait_for_reset_deassert();
-
+  
+  task reset(int unsigned cycles = 5);
+    
+    vif.driver_cb.rst_n      <= 0;
+    vif.driver_cb.in_vld     <= 0;
+    vif.driver_cb.data_in    <= 0;
+    vif.driver_cb.cfg        <= 0;
+    vif.driver_cb.local_rdy  <= 1;  // consumer always ready by default
+    vif.driver_cb.remote_rdy <= 1;  // consumer always ready by default
+ 
+    // hold reset for N clock cycles
+    repeat (cycles) @(vif.driver_cb);
+ 
+    // release reset
+    vif.driver_cb.rst_n <= 1;
+ 
+    // wait 2 more cycles for DUT to stabilize
+    repeat (2) @(vif.driver_cb);
+ 
+    $display("[DRIVER] Reset done");
+  endtask
+  
+  
+  task run();
+    bird_packet pkt;
     forever begin
-      seq_item_port.get_next_item(req);
-
-      `uvm_info("BIRD_DRV",
-                $sformatf("Driving item: %s", req.convert2string()),
-                UVM_MEDIUM)
-
-      drive_fragment(req);
-
-      seq_item_port.item_done();
+      // wait for a packet from the sequence
+      mbx.get(pkt); //block here until the pkt available
+      send_fragment(pkt);  // send it to the DUT
     end
   endtask
-
-  task drive_idle();
-    vif.driver_cb.in_vld  <= 1'b0;
-    vif.driver_cb.data_in <= 8'h00;
-    vif.driver_cb.cfg     <= 32'h0000_0000;
-
-    // Keep output consumers ready during simple Phase 1 bring-up.
-    // This prevents DUT output queues from stalling.
-    vif.driver_cb.local_rdy  <= 1'b1;
-    vif.driver_cb.remote_rdy <= 1'b1;
-  endtask
-
-  task wait_for_reset_deassert();
-    while (vif.rst_n !== 1'b1) begin
+  
+  
+  // send_fragment()
+ 
+  // A fragment = payload bytes + 2 CRC bytes
+  // cfg is driven before the first byte and held stable
+ 
+  task send_fragment(bird_packet pkt);
+ 
+    //1. put cfg on the wire
+    // cfg must be valid on the same cycle as the first payload byte
+    vif.driver_cb.cfg <= pkt.cfg_word;
+ 
+    // 2.send each payload byte 
+    foreach (pkt.payload[i]) begin
+      vif.driver_cb.in_vld  <= 1;
+      vif.driver_cb.data_in <= pkt.payload[i];
       @(vif.driver_cb);
+      // in_rdy is always 1 in this DUT so no need to wait
+      // but we check anyway for correctness
+      while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
     end
-
+ 
+    // 3. Step 3: send CRC high byte 
+    vif.driver_cb.in_vld  <= 1;
+    vif.driver_cb.data_in <= pkt.crc16[15:8];
     @(vif.driver_cb);
+    while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
+ 
+    // 4. send CRC low byte
+    vif.driver_cb.in_vld  <= 1;
+    vif.driver_cb.data_in <= pkt.crc16[7:0];
+    @(vif.driver_cb);
+    while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
+ 
+    // 5. deassert valid 
+    vif.driver_cb.in_vld  <= 0;
+    vif.driver_cb.data_in <= 0;
+    @(vif.driver_cb);
+ 
+    `ifdef DEBUG
+      pkt.print("DRIVER");
+    `endif
+ 
   endtask
 
-  task drive_fragment(bird_seq_item req);
-    bit [31:0]    cfg_word;
-    byte unsigned stream[$];
-
-    cfg_word = req.get_cfg();
-    req.get_input_stream(stream);
-
-    foreach (stream[i]) begin
-      drive_byte_with_backpressure(stream[i], cfg_word);
-    end
-
-    drive_idle();
-
-    // One idle cycle between fragments/items.
+  // set_local_rdy() — control local consumer backpressure
+ 
+  task set_local_rdy(input bit val);
+    vif.driver_cb.local_rdy <= val;
     @(vif.driver_cb);
   endtask
+ 
+  // set_remote_rdy() — control remote consumer backpressure
 
-  task drive_byte_with_backpressure(byte unsigned data_byte,
-                                    bit [31:0] cfg_word);
-
-    vif.driver_cb.in_vld  <= 1'b1;
-    vif.driver_cb.data_in <= data_byte;
-    vif.driver_cb.cfg     <= cfg_word;
-
+  task set_remote_rdy(input bit val);
+    vif.driver_cb.remote_rdy <= val;
     @(vif.driver_cb);
-
-    while (vif.driver_cb.in_rdy !== 1'b1) begin
-      @(vif.driver_cb);
-    end
   endtask
+ 
+  
+  // wait_cycles() — helper to idle for N cycles
 
+  task wait_cycles(int unsigned n);
+    repeat (n) @(vif.driver_cb);
+  endtask
+ 
 endclass : bird_driver
-
-`endif // BIRD_DRIVER_SV
+ 
+`endif
