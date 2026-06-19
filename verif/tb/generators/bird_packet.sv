@@ -216,6 +216,27 @@ class bird_packet;
     foreach (payload[i]) $write("%02h ", payload[i]);
     $write("\n");
   endfunction
+  
+  
+  
+  // compute_crc16_q — called by scoreboard
+  // takes a queue instead of array
+  static function bit [15:0] compute_crc16_q(
+    input byte unsigned payload_q[$]
+  );
+    bit [15:0] crc;
+    crc = 16'hFFFF;
+    foreach (payload_q[i]) begin
+      crc ^= {payload_q[i], 8'h00};
+      for (int b = 0; b < 8; b++) begin
+        if (crc[15])
+          crc = (crc << 1) ^ 16'h1021;
+        else
+          crc = crc << 1;
+      end
+    end
+    return crc;
+  endfunction
 
 endclass
 
