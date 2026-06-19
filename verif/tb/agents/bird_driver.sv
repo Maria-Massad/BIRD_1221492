@@ -1,122 +1,88 @@
-`ifndef BIRD_DRIVE_SV
-`define BIRD_DRIVE_SV
-
-`include "bird_if.sv"
-`include "bird_pkg.sv"
-
-import bird_pkg::* ;
-
-
-
+`ifndef BIRD_DRIVER_SV
+`define BIRD_DRIVER_SV
 
 class bird_driver;
 
- virtual bird_if vif;
- mailbox #(bird_packet) mbx;
- 
- 
-  function new(virtual bird_if vif, mailbox #(bird_packet) mbx);
+  virtual bird_if.DRIVER vif;
+
+  function new(virtual bird_if.DRIVER vif);
     this.vif = vif;
-    this.mbx = mbx;
   endfunction
-  
-  task reset(int unsigned cycles = 5);
-    
-    vif.driver_cb.rst_n      <= 0;
-    vif.driver_cb.in_vld     <= 0;
-    vif.driver_cb.data_in    <= 0;
-    vif.driver_cb.cfg        <= 0;
-    vif.driver_cb.local_rdy  <= 1;  // consumer always ready by default
-    vif.driver_cb.remote_rdy <= 1;  // consumer always ready by default
- 
-    // hold reset for N clock cycles
-    repeat (cycles) @(vif.driver_cb);
- 
-    // release reset
-    vif.driver_cb.rst_n <= 1;
- 
-    // wait 2 more cycles for DUT to stabilize
-    repeat (2) @(vif.driver_cb);
- 
-    $display("[DRIVER] Reset done");
+
+  //reset all driven signals through drv_cb
+  task reset_driver_signals();
+    vif.drv_cb.in_vld     <= 1'b0;
+    vif.drv_cb.data_in    <= 8'h00;
+    vif.drv_cb.cfg        <= 32'h0000_0000;
+    vif.drv_cb.local_rdy  <= 1'b1;
+    vif.drv_cb.remote_rdy <= 1'b1;
   endtask
-  
-  
-  task run();
-    bird_packet pkt;
-    forever begin
-      // wait for a packet from the sequence
-      mbx.get(pkt); //block here until the pkt available
-      send_fragment(pkt);  // send it to the DUT
+
+  task wait_for_reset_release();
+    wait (vif.rst_n == 1'b1);
+    @(vif.drv_cb);
+  endtask
+
+  //drive one input byte + cfg through drv_cb, waits for in_rdy
+  task drive_input_byte(
+    input byte unsigned data_byte,
+    input bit [31:0]    cfg_value
+  );
+    vif.drv_cb.in_vld  <= 1'b1;
+    vif.drv_cb.data_in <= data_byte;
+    vif.drv_cb.cfg     <= cfg_value;
+
+    @(vif.drv_cb);
+    while (vif.drv_cb.in_rdy !== 1'b1) begin
+      @(vif.drv_cb);
+    end
+
+    vif.drv_cb.in_vld  <= 1'b0;
+    vif.drv_cb.data_in <= 8'h00;
+  endtask
+
+  //drive a full packet, payload then crc high then crc low
+  task drive_packet(bird_packet pkt);
+    pkt.finalize_packet();
+
+    $display("[%0t] DRIVER: Sending packet", $time);
+    pkt.print("DRIVER_PACKET");
+
+    if (pkt.payload_len == 8'd0) begin
+      drive_input_byte(8'h00, pkt.cfg);
+      drive_input_byte(8'h00, pkt.cfg);
+    end
+    else begin
+      foreach (pkt.payload[i]) begin
+        drive_input_byte(pkt.payload[i], pkt.cfg);
+      end
+
+      drive_input_byte(pkt.crc16[15:8], pkt.cfg);
+      drive_input_byte(pkt.crc16[7:0],  pkt.cfg);
+    end
+
+    @(vif.drv_cb);
+  endtask
+
+  task set_local_ready(input bit ready_value);
+    vif.drv_cb.local_rdy <= ready_value;
+    @(vif.drv_cb);
+  endtask
+
+  task set_remote_ready(input bit ready_value);
+    vif.drv_cb.remote_rdy <= ready_value;
+    @(vif.drv_cb);
+  endtask
+
+  task idle(input int cycles);
+    vif.drv_cb.in_vld  <= 1'b0;
+    vif.drv_cb.data_in <= 8'h00;
+
+    repeat (cycles) begin
+      @(vif.drv_cb);
     end
   endtask
-  
-  
-  // send_fragment()
- 
-  // A fragment = payload bytes + 2 CRC bytes
-  // cfg is driven before the first byte and held stable
- 
-  task send_fragment(bird_packet pkt);
- 
-    //1. put cfg on the wire
-    // cfg must be valid on the same cycle as the first payload byte
-    vif.driver_cb.cfg <= pkt.cfg_word;
- 
-    // 2.send each payload byte 
-    foreach (pkt.payload[i]) begin
-      vif.driver_cb.in_vld  <= 1;
-      vif.driver_cb.data_in <= pkt.payload[i];
-      @(vif.driver_cb);
-      // in_rdy is always 1 in this DUT so no need to wait
-      // but we check anyway for correctness
-      while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
-    end
- 
-    // 3. Step 3: send CRC high byte 
-    vif.driver_cb.in_vld  <= 1;
-    vif.driver_cb.data_in <= pkt.crc16[15:8];
-    @(vif.driver_cb);
-    while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
- 
-    // 4. send CRC low byte
-    vif.driver_cb.in_vld  <= 1;
-    vif.driver_cb.data_in <= pkt.crc16[7:0];
-    @(vif.driver_cb);
-    while (!vif.driver_cb.in_rdy) @(vif.driver_cb);
- 
-    // 5. deassert valid 
-    vif.driver_cb.in_vld  <= 0;
-    vif.driver_cb.data_in <= 0;
-    @(vif.driver_cb);
- 
-    `ifdef DEBUG
-      pkt.print("DRIVER");
-    `endif
- 
-  endtask
 
-  // set_local_rdy() — control local consumer backpressure
- 
-  task set_local_rdy(input bit val);
-    vif.driver_cb.local_rdy <= val;
-    @(vif.driver_cb);
-  endtask
- 
-  // set_remote_rdy() — control remote consumer backpressure
+endclass
 
-  task set_remote_rdy(input bit val);
-    vif.driver_cb.remote_rdy <= val;
-    @(vif.driver_cb);
-  endtask
- 
-  
-  // wait_cycles() — helper to idle for N cycles
-
-  task wait_cycles(int unsigned n);
-    repeat (n) @(vif.driver_cb);
-  endtask
- 
-endclass : bird_driver
- 
 `endif
