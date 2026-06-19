@@ -19,16 +19,11 @@ class bird_env;
   bird_scoreboard     scoreboard;
   bird_coverage       coverage;
 
-  // new()
-  // Creates the environment infrastructure only.  Test stimulus stays inside
-  // the individual test files; this class only owns common components.
-  function new(virtual bird_if vif);
+   function new(virtual bird_if vif);
     this.vif = vif;
     connect();
   endfunction
 
-  // connect()
-  // Creates and wires the common mailboxes/components exactly once.
   function void connect();
     if (driver != null) begin
       return;
@@ -49,10 +44,7 @@ class bird_env;
     $display("[%0t] ENV: Components created and connected", $time);
   endfunction
 
-  // start_monitors()
-  // Launches passive infrastructure threads.  The driver is not started here;
-  // each test drives its own packets through env.driver.drive_packet().
-  task start_monitors();
+   task start_monitors();
     $display("[%0t] ENV: Starting monitors, scoreboard, and coverage", $time);
     fork
       input_monitor.run();
@@ -63,16 +55,12 @@ class bird_env;
     join_none
   endtask
 
-  // report()
-  // Prints checker and functional coverage summaries.
-  task report();
+ task report();
     scoreboard.report();
     coverage.report();
   endtask
 
-  // wait_cycles()
-  // Shared timing utility only.
-  task wait_cycles(input int cycles);
+   task wait_cycles(input int cycles);
     repeat (cycles) @(vif.drv_cb);
   endtask
 
