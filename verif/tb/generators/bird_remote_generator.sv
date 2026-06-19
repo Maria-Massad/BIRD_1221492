@@ -70,44 +70,6 @@ class bird_remote_generator;
     return pkt;
   endfunction
 
-  //build merged payload for the standard 2 frag remote pkt
-  function void build_standard_merged_payload(
-    output byte unsigned merged_payload[$]
-  );
-    merged_payload.delete();
-
-    merged_payload.push_back(8'hAA);
-    merged_payload.push_back(8'hBB);
-    merged_payload.push_back(8'hCC);
-    merged_payload.push_back(8'hDD);
-  endfunction
-
-  //calc crc16 for any byte queue
-  function bit [15:0] calculate_crc16_for_queue(
-    input byte unsigned data_queue[$]
-  );
-    bit [15:0] crc;
-    int i;
-    int b;
-
-    crc = 16'hFFFF;
-
-    foreach (data_queue[i]) begin
-      crc ^= {data_queue[i], 8'h00};
-
-      for (b = 0; b < 8; b++) begin
-        if (crc[15]) begin
-          crc = (crc << 1) ^ 16'h1021;
-        end
-        else begin
-          crc = crc << 1;
-        end
-      end
-    end
-
-    return crc;
-  endfunction
-
 endclass
 
 `endif
