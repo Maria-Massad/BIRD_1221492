@@ -21,7 +21,7 @@ class bird_packet;
   bit [15:0] crc16;
   bit [31:0] cfg;
 
-  
+
   function new();
     traffic_type = LOCAL_TRAFFIC;
     payload_len  = 8'd1;
@@ -36,8 +36,8 @@ class bird_packet;
     cfg          = 32'h0000_0000;
   endfunction
 
- 
-  // Basic valid packet fields
+
+  // Basic valid packet fields — spec Section 5
   constraint c_valid_basic {
     payload_len inside {[8'd1:8'd255]};
     frag_num    inside {[5'd1:5'd31]};
@@ -48,19 +48,24 @@ class bird_packet;
     payload.size() == payload_len;
   }
 
-  
-  // DUT requires BOTH seq_num==1 AND frag_num==1 for local packets
-  // Without seq_num==1, DUT drops the packet (cfg_invalid returns 1)
+
+  // Spec Section 6 — Local Traffic Processing:
+  //   "FRAG_NUM shall be equal to 1."
+  //   "SEQ_NUM identifies the packet but has no functional impact
+  //    on local routing."
+  // Only FRAG_NUM is constrained for local traffic. SEQ_NUM is left
+  // free to randomize across its full valid range (1-31) so that
+  // tests can verify it has no functional impact, as required by
+  // spec Section 10: "Verify correct use of FRAG_NUM and SEQ_NUM."
   constraint c_local_rules {
     if (traffic_type == LOCAL_TRAFFIC) {
       frag_num == 5'd1;
-      seq_num  == 5'd1;   // ? ADDED: DUT rule from design.sv line: if(c[28:24]!=5'd1) inv=1
     }
   }
 
-  
+
   // build_cfg() — pack fields into 32-bit cfg word
-  // Bit layout from spec §5:
+  // Bit layout from spec Section 5:
   //   [0]     traffic_type
   //   [7:1]   rsvd_7_1
   //   [15:8]  payload_len
@@ -68,7 +73,7 @@ class bird_packet;
   //   [23:21] rsvd_23_21
   //   [28:24] seq_num
   //   [31:29] rsvd_31_29
-  
+
   function void build_cfg();
     cfg = {
       rsvd_31_29,    // bits 31:29
@@ -90,7 +95,7 @@ class bird_packet;
     bit [15:0] crc;
     crc = 16'hFFFF;
     foreach (payload[i]) begin
-      crc ^= {payload[i], 8'h00};   // byte ? top 8 bits (MSB first)
+      crc ^= {payload[i], 8'h00};   // byte -> top 8 bits (MSB first)
       for (int b = 0; b < 8; b++) begin
         if (crc[15])
           crc = (crc << 1) ^ 16'h1021;
@@ -110,14 +115,18 @@ class bird_packet;
     crc16 = calculate_crc16();
   endfunction
 
-  
+
   // Called automatically after pkt.randomize()
   // Ensures cfg and crc16 are always correct after randomization
   function void post_randomize();
     finalize_packet();
   endfunction
 
-  
+
+  // make_local() — directed local packet.
+  // sequence_number is accepted as given, with no enforced value,
+  // per spec Section 6 ("SEQ_NUM... has no functional impact on
+  // local routing"). frag_num is always forced to 1 per spec.
   function void make_local(
     input bit [4:0]      sequence_number,
     input byte unsigned  data[]
@@ -134,7 +143,7 @@ class bird_packet;
     finalize_packet();
   endfunction
 
-  
+
   // make_remote_fragment() — directed remote fragment
 
   function void make_remote_fragment(
@@ -154,9 +163,9 @@ class bird_packet;
     finalize_packet();
   endfunction
 
-  
-  // Invalid packet helpers — for drop tests
- 
+
+  // Invalid packet helpers — for drop tests, per spec Section 8.1
+
   function void make_invalid_seq_zero(input byte unsigned data[]);
     make_local(5'd1, data);
     seq_num = 5'd0;      // override to invalid value
@@ -187,9 +196,9 @@ class bird_packet;
     finalize_packet();
   endfunction
 
-  
+
   // print() — debug display
-  
+
   function void print(string tag = "BIRD_PACKET");
     $display("[%0t] %s", $time, tag);
     $display("  traffic_type = %0d (%s)",

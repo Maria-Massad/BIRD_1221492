@@ -7,11 +7,11 @@ class bird_local_generator;
   function new();
   endfunction
 
-  
+
   // create_basic_local_packet()
   // Valid local packet — payload: AA BB CC DD
-  // seq_num=1, frag_num=1 ? correct, no change needed
-  
+  // seq_num=1, frag_num=1 — correct, no change needed
+
   function bird_packet create_basic_local_packet();
     bird_packet pkt;
     byte unsigned data[];
@@ -25,53 +25,72 @@ class bird_local_generator;
     return pkt;
   endfunction
 
-  
+
   // create_min_payload_local_packet()
- 
- 
+  // Valid local packet — minimum payload boundary (1 byte)
+
   function bird_packet create_min_payload_local_packet();
     bird_packet pkt;
     byte unsigned data[];
     pkt  = new();
     data = new[1];
     data[0] = 8'h5A;
-    pkt.make_local(5'd1, data);   
+    pkt.make_local(5'd1, data);
     return pkt;
   endfunction
 
-  
+
   // create_local_packet()
-  // Custom local packet with user-defined sequence number and payload
+  // Custom local packet with user-defined sequence number and payload.
   //
-  // Added assertion to warn if sequence_number != 1
-  // DUT only accepts local packets with seq_num==1
-  //         Passing any other value will cause a silent drop
-  
+  // Per spec Section 6, SEQ_NUM has no functional impact on local
+  // routing — any valid value (1-31) is accepted. No warning needed
+  // since any sequence_number value is spec-valid for local traffic.
+
   function bird_packet create_local_packet(
     input bit [4:0]      sequence_number,
     input byte unsigned  data[]
   );
     bird_packet pkt;
-    // warn if seq_num != 1 — DUT will drop local packets with seq?1
-    if (sequence_number != 5'd1)
-      $display("[LOCAL_GEN] WARNING: sequence_number=%0d for local packet — DUT requires seq=1, packet may be dropped",
-               sequence_number);
     pkt = new();
     pkt.make_local(sequence_number, data);
     return pkt;
   endfunction
 
-  
+
   // create_max_payload_local_packet()
   // Valid local packet — payload: 255 bytes (0x00 to 0xFE)
-  
+
   function bird_packet create_max_payload_local_packet();
     bird_packet pkt;
     byte unsigned data[];
     pkt  = new();
     data = new[255];
     foreach (data[i]) data[i] = byte'(i);
-    pkt.make_local(5'd1, data);   // FIX: was 5'd3, now 5'd1
+    pkt.make_local(5'd1, data);
+    return pkt;
+  endfunction
+
+
+  // create_local_packet_varied_seq()
+  // Generates a valid local packet with a specific SEQ_NUM, used to
+  // build a suite of tests that send different SEQ_NUM values and
+  // confirm they all forward identically — directly verifying spec
+  // Section 6's claim that SEQ_NUM has no functional impact on local
+  // routing, and spec Section 10's verification note: "Verify correct
+  // use of FRAG_NUM and SEQ_NUM."
+
+  function bird_packet create_local_packet_varied_seq(
+    input bit [4:0] sequence_number
+  );
+    bird_packet pkt;
+    byte unsigned data[];
+    pkt  = new();
+    data = new[3];
+    data[0] = 8'h01;
+    data[1] = 8'h02;
+    data[2] = 8'h03;
+    pkt.make_local(sequence_number, data);
     return pkt;
   endfunction
 
