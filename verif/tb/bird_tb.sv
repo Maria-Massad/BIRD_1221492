@@ -1,121 +1,161 @@
+//=============================================================================
+// bird_tb.sv
+// Top-level testbench
+// Reference: BIRD Functional Specification
+//=============================================================================
+`timescale 1ns/1ps
 
-`include "bird_if.sv"
-`include "bird_pkg.sv"
-`include "bird_driver.sv"
+// Include order matters — each file must come after files it depends on
 
-`include "bird_sanity_test.sv"
-`include "bird_drop_test_a.sv"
-`include "bird_backpressure_test.sv"
+// 1. Interface — everything needs this
+`include "tb/interface/bird_if.sv"
 
-import bird_pkg::*;
+// 2. Packet class — generators and monitors need it
+`include "tb/generators/bird_packet.sv"
+
+// 3. Generators — env needs them
+`include "tb/generators/bird_local_generator.sv"
+`include "tb/generators/bird_remote_generator.sv"
+`include "tb/generators/bird_drop_generator.sv"
+
+// 4. Driver — env needs it
+`include "tb/drivers/bird_driver.sv"
+
+// 5. Monitors — env needs them
+`include "tb/monitors/bird_input_monitor.sv"
+`include "tb/monitors/bird_local_monitor.sv"
+`include "tb/monitors/bird_remote_monitor.sv"
+
+// 6. Checkers and coverage — env needs them
+`include "tb/checkers/bird_scoreboard.sv"
+`include "tb/checkers/bird_assertions.sv"
+`include "tb/coverage/bird_coverage.sv"
+
+// 7. Environment — tests need it
+`include "tb/env/bird_env.sv"
+
+// 8. Tests last — they need everything above
+`include "tb/tests/bird_local_basic_test.sv"
+`include "tb/tests/bird_remote_reorder_test.sv"
+`include "tb/tests/bird_drop_conditions_test.sv"
+`include "tb/tests/bird_reset_test.sv"
+`include "tb/tests/bird_backpressure_test.sv"
+`include "tb/tests/bird_coverage_test.sv"
 
 module bird_tb;
 
-  logic clk = 0;
-  always #5 clk = ~clk;
-  
-  bird_if dut_if(.clk(clk));
-  
-
-  
-
-  // DUT
-  bird dut (
-    .clk(clk),
-    .rst_n(dut_if.rst_n),
-
-    .in_vld(dut_if.in_vld),
-    .in_rdy(dut_if.in_rdy),
-    .data_in(dut_if.data_in),
-    .cfg(dut_if.cfg),
-
-    .drop_cnt(dut_if.drop_cnt),
-
-    .local_vld(dut_if.local_vld),
-    .local_rdy(dut_if.local_rdy),
-    .data_local(dut_if.data_local),
-
-    .remote_vld(dut_if.remote_vld),
-    .remote_rdy(dut_if.remote_rdy),
-    .data_remote(dut_if.data_remote)
-  );
-  
-  
-  mailbox #(bird_packet) mbx =new();
-  
-  bird_driver drv;
-
-
-
-
-
+  //-------------------------------------------------------------------------
+  // Clock
+  //-------------------------------------------------------------------------
+  logic clk;
   initial begin
-    // VCD
-    $fsdbDumpfile("waves.fsdb");
-    $fsdbDumpvars(0, bird_tb);
-    
-    
-    // create driver and connect it
-    drv = new(dut_if, mbx);
+    clk = 1'b0;
+    forever #5 clk = ~clk;
+  end
 
-    
-    // start driver in background (parallel thread) 
-    fork
-      drv.run();
-    join_none
- 
-    // reset the DUT 
-    drv.reset(5);
- 
-    // --- run tests one by one ---
-    // Each test is a task defined in its own file
- 
-    $display("==============================================");
-    $display(" BIRD Testbench Starting");
-    $display("==============================================");
- 
-   //tests
-    run_sanity_test();
-   
-    run_backpressure_test();
-    run_drop_test_a();
-    
- 
-    // give DUT time to finish any in-flight packets
-    drv.wait_cycles(20);
- 
-    $display("==============================================");
-    $display(" All tests done");
-    $display("==============================================");
- 
+  //-------------------------------------------------------------------------
+  // Interface instance
+  //-------------------------------------------------------------------------
+  bird_if bird_vif(clk);
+
+  //-------------------------------------------------------------------------
+  // DUT instance
+  //-------------------------------------------------------------------------
+  bird dut (
+    .clk         (bird_vif.clk),
+    .rst_n       (bird_vif.rst_n),
+    .drop_cnt    (bird_vif.drop_cnt),
+    .in_vld      (bird_vif.in_vld),
+    .in_rdy      (bird_vif.in_rdy),
+    .data_in     (bird_vif.data_in),
+    .cfg         (bird_vif.cfg),
+    .local_vld   (bird_vif.local_vld),
+    .local_rdy   (bird_vif.local_rdy),
+    .data_local  (bird_vif.data_local),
+    .remote_vld  (bird_vif.remote_vld),
+    .remote_rdy  (bird_vif.remote_rdy),
+    .data_remote (bird_vif.data_remote)
+  );
+
+  //-------------------------------------------------------------------------
+  // Assertions instance
+  //-------------------------------------------------------------------------
+  bird_assertions assertions_inst(.vif(bird_vif));
+
+  //-------------------------------------------------------------------------
+  // Environment and test objects
+  //-------------------------------------------------------------------------
+  bird_env              env;
+  bird_local_basic_test     local_test;
+  bird_remote_reorder_test  remote_test;
+  bird_drop_conditions_test drop_test;
+  bird_reset_test           reset_test;
+  bird_backpressure_test    bp_test;
+  bird_coverage_test        cov_test;
+
+  //-------------------------------------------------------------------------
+  // Reset task — spec §9
+  //-------------------------------------------------------------------------
+  task automatic apply_reset();
+    $display("[%0t] TB: Applying reset", $time);
+    bird_vif.rst_n = 1'b0;
+    repeat (5) @(posedge clk);
+    bird_vif.rst_n = 1'b1;
+    repeat (5) @(posedge clk);
+    $display("[%0t] TB: Reset released", $time);
+  endtask
+
+  //-------------------------------------------------------------------------
+  // Main flow
+  //-------------------------------------------------------------------------
+  initial begin
+    // safe defaults
+    bird_vif.rst_n      = 1'b0;
+    bird_vif.in_vld     = 1'b0;
+    bird_vif.data_in    = 8'h00;
+    bird_vif.cfg        = 32'h0000_0000;
+    bird_vif.local_rdy  = 1'b1;
+    bird_vif.remote_rdy = 1'b1;
+
+    // build env and tests
+    env         = new(bird_vif);
+    local_test  = new(env);
+    remote_test = new(env);
+    drop_test   = new(env);
+    reset_test  = new(env);
+    bp_test     = new(env);
+    cov_test    = new(env);
+
+    // initialize and start monitors
+    env.init();
+    env.start_monitors();
+
+    // apply reset
+    apply_reset();
+
+    $display("============================================================");
+    $display("BIRD TESTBENCH STARTED");
+    $display("============================================================");
+
+    // run tests
+    local_test.run();
+    remote_test.run();
+    drop_test.run();
+    reset_test.run();
+    bp_test.run();
+    cov_test.run();
+
+    // wait for any in-flight data
+    repeat (20) @(posedge clk);
+
+    // final report
+    env.report();
+
+    $display("============================================================");
+    $display("BIRD TESTBENCH FINISHED");
+    $display("============================================================");
+
     $finish;
   end
-  // sanity test put pkt in mail box
-  
-  task run_sanity_test();
-    bird_sanity_test t;
-    t = new(dut_if, mbx);
-    $display("\n--- Running: bird_sanity_test ---");
-    t.run();
-    drv.wait_cycles(10);
-  endtask
-  
-  task run_drop_test_a();
-    bird_drop_test_a t;
-    drv.reset(5);
-    t = new(dut_if, mbx);
-    $display("\n--- Running: bird_drop_test_a ---");
-    t.run();
-    drv.wait_cycles(10);
-  endtask
-  
-  //back pressure test
-  task run_backpressure_test();
-    bird_backpressure_test t;
-    drv.wait_cycles(30);
-    t = new(dut_if, mbx);
-    $display("\n--- Running: bird_backpressure_test ---");
-    t.run();
-    drv.wait_cycles(10);
-  endtask
-endmodule : bird_tb
+
+endmodule
