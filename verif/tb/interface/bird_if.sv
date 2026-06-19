@@ -66,7 +66,7 @@ interface bird_if(input logic clk);
   
   modport DRIVER (
     input  clk,
-    output  rst_n,
+    input  rst_n,
 
     output in_vld,
     output data_in,
