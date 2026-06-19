@@ -1,22 +1,7 @@
 `ifndef BIRD_SCOREBOARD_SV
 `define BIRD_SCOREBOARD_SV
 
-import bird_pkg::*;
-
-//=============================================================================
-// File        : bird_scoreboard.sv
-// Project     : BIRD - Birzeit Integrated Router Design
-// Description : Plain SystemVerilog scoreboard.
-//               - Receives reconstructed input packets from input monitor.
-//               - Predicts local output bytes.
-//               - Predicts remote merged 32-bit words and regenerated CRC16.
-//               - Compares local/remote monitor outputs against predictions.
-//               - Tracks predicted packet drops.
-//=============================================================================
-
 class bird_scoreboard;
-
-  virtual bird_if.MONITOR vif;
 
   mailbox #(bird_packet)   input_mbx;
   mailbox #(byte unsigned) local_mbx;
@@ -24,6 +9,9 @@ class bird_scoreboard;
 
   byte unsigned expected_local_q[$];
   bit [31:0]    expected_remote_q[$];
+
+  byte unsigned actual_local_q[$];
+  bit [31:0]    actual_remote_q[$];
 
   int unsigned pass_count;
   int unsigned fail_count;
@@ -36,12 +24,10 @@ class bird_scoreboard;
   byte unsigned frag_payload[1:31][$];
 
   function new(
-    virtual bird_if.MONITOR vif,
     mailbox #(bird_packet) input_mbx,
     mailbox #(byte unsigned) local_mbx,
     mailbox #(bit [31:0]) remote_mbx
   );
-    this.vif        = vif;
     this.input_mbx  = input_mbx;
     this.local_mbx  = local_mbx;
     this.remote_mbx = remote_mbx;
@@ -50,6 +36,10 @@ class bird_scoreboard;
     fail_count            = 0;
     predicted_drop_count  = 0;
     clear_remote_state();
+  endfunction
+
+  function bit is_remote_packet(bird_packet pkt);
+    return pkt.cfg[0];
   endfunction
 
   function void clear_remote_state();
@@ -72,7 +62,7 @@ class bird_scoreboard;
     if (pkt.seq_num     == 5'd0) return 1'b0;
     if (pkt.frag_num    == 5'd0) return 1'b0;
 
-    if ((pkt.traffic_type == LOCAL_PKT) && (pkt.frag_num != 5'd1)) return 1'b0;
+    if (!is_remote_packet(pkt) && (pkt.frag_num != 5'd1)) return 1'b0;
 
     return 1'b1;
   endfunction
@@ -93,6 +83,46 @@ class bird_scoreboard;
     return 1'b1;
   endfunction
 
+  function void compare_local_ready();
+    byte unsigned actual;
+    byte unsigned expected;
+
+    while ((expected_local_q.size() != 0) && (actual_local_q.size() != 0)) begin
+      expected = expected_local_q.pop_front();
+      actual   = actual_local_q.pop_front();
+
+      if (actual !== expected) begin
+        $error("[%0t] SCOREBOARD FAIL: LOCAL_OUTPUT got=0x%02h expected=0x%02h",
+               $time, actual, expected);
+        fail_count++;
+      end
+      else begin
+        $display("[%0t] SCOREBOARD PASS: LOCAL_OUTPUT byte=0x%02h", $time, actual);
+        pass_count++;
+      end
+    end
+  endfunction
+
+  function void compare_remote_ready();
+    bit [31:0] actual;
+    bit [31:0] expected;
+
+    while ((expected_remote_q.size() != 0) && (actual_remote_q.size() != 0)) begin
+      expected = expected_remote_q.pop_front();
+      actual   = actual_remote_q.pop_front();
+
+      if (actual !== expected) begin
+        $error("[%0t] SCOREBOARD FAIL: REMOTE_OUTPUT got=0x%08h expected=0x%08h",
+               $time, actual, expected);
+        fail_count++;
+      end
+      else begin
+        $display("[%0t] SCOREBOARD PASS: REMOTE_OUTPUT word=0x%08h", $time, actual);
+        pass_count++;
+      end
+    end
+  endfunction
+
   function void pack_bytes_to_words(input byte unsigned bytes[$]);
     int i;
     i = 0;
@@ -103,7 +133,7 @@ class bird_scoreboard;
 
       for (int k = 0; k < 4; k++) begin
         if (i < bytes.size()) begin
-          word[8*k +: 8] = bytes[i];
+          word[24 - 8*k +: 8] = bytes[i];
           i++;
         end
       end
@@ -113,24 +143,27 @@ class bird_scoreboard;
   endfunction
 
   function void queue_remote_output();
-    byte unsigned merged_payload[$];
+    byte unsigned merged_stream[$];
     bit [15:0]    regenerated_crc;
 
-    merged_payload.delete();
+    merged_stream.delete();
 
     for (int f = 1; f <= active_max_frag; f++) begin
       foreach (frag_payload[f][i]) begin
-        merged_payload.push_back(frag_payload[f][i]);
+        merged_stream.push_back(frag_payload[f][i]);
       end
     end
 
-    regenerated_crc = bird_packet::compute_crc16_q(merged_payload);
+    regenerated_crc = bird_packet::compute_crc16_q(merged_stream);
 
-    pack_bytes_to_words(merged_payload);
-    expected_remote_q.push_back({16'h0000, regenerated_crc});
+    merged_stream.push_back(regenerated_crc[15:8]);
+    merged_stream.push_back(regenerated_crc[7:0]);
 
-    $display("[%0t] SCOREBOARD: Remote packet merged in FRAG_NUM order 1..%0d, payload_bytes=%0d, crc=0x%04h",
-             $time, active_max_frag, merged_payload.size(), regenerated_crc);
+    pack_bytes_to_words(merged_stream);
+    compare_remote_ready();
+
+    $display("[%0t] SCOREBOARD: Remote packet merged in FRAG_NUM order 1..%0d, stream_bytes=%0d, crc=0x%04h",
+             $time, active_max_frag, merged_stream.size(), regenerated_crc);
   endfunction
 
   function void predict_local_packet(bird_packet pkt);
@@ -140,6 +173,7 @@ class bird_scoreboard;
 
     expected_local_q.push_back(pkt.crc16[15:8]);
     expected_local_q.push_back(pkt.crc16[7:0]);
+    compare_local_ready();
 
     $display("[%0t] SCOREBOARD: Local expected bytes queued=%0d",
              $time, pkt.payload.size() + 2);
@@ -200,23 +234,16 @@ class bird_scoreboard;
     end
   endfunction
 
-  //-------------------------------------------------------------------------
-  // Main prediction entry point.
-  // This is the function to trace by hand for the remote multi-fragment case.
-  // Example out-of-order remote packet:
-  //   seq=5 frag=2 payload=CC DD  -> stored, no output yet because frag 1 is missing
-  //   seq=5 frag=1 payload=AA BB  -> merged AA BB CC DD, CRC regenerated, remote words queued
-  //-------------------------------------------------------------------------
   function void process_input_packet(bird_packet pkt);
     if (!valid_cfg_for_scoreboard(pkt)) begin
       predict_packet_drop($sformatf("invalid cfg=0x%08h", pkt.cfg));
-      if (pkt.traffic_type == REMOTE_PKT) begin
+      if (is_remote_packet(pkt)) begin
         clear_remote_state();
       end
       return;
     end
 
-    if (pkt.traffic_type == LOCAL_PKT) begin
+    if (!is_remote_packet(pkt)) begin
       predict_local_packet(pkt);
     end
     else begin
@@ -235,69 +262,21 @@ class bird_scoreboard;
 
   task check_local_outputs();
     byte unsigned actual;
-    byte unsigned expected;
-    int timeout;
 
     forever begin
       local_mbx.get(actual);
-
-      timeout = 0;
-      while ((expected_local_q.size() == 0) && (timeout < 100)) begin
-        @(vif.mon_cb);
-        timeout++;
-      end
-
-      if (expected_local_q.size() == 0) begin
-        $error("[%0t] SCOREBOARD FAIL: LOCAL_OUTPUT unexpected byte 0x%02h", $time, actual);
-        fail_count++;
-      end
-      else begin
-        expected = expected_local_q.pop_front();
-
-        if (actual !== expected) begin
-          $error("[%0t] SCOREBOARD FAIL: LOCAL_OUTPUT got=0x%02h expected=0x%02h",
-                 $time, actual, expected);
-          fail_count++;
-        end
-        else begin
-          $display("[%0t] SCOREBOARD PASS: LOCAL_OUTPUT byte=0x%02h", $time, actual);
-          pass_count++;
-        end
-      end
+      actual_local_q.push_back(actual);
+      compare_local_ready();
     end
   endtask
 
   task check_remote_outputs();
     bit [31:0] actual;
-    bit [31:0] expected;
-    int timeout;
 
     forever begin
       remote_mbx.get(actual);
-
-      timeout = 0;
-      while ((expected_remote_q.size() == 0) && (timeout < 100)) begin
-        @(vif.mon_cb);
-        timeout++;
-      end
-
-      if (expected_remote_q.size() == 0) begin
-        $error("[%0t] SCOREBOARD FAIL: REMOTE_OUTPUT unexpected word 0x%08h", $time, actual);
-        fail_count++;
-      end
-      else begin
-        expected = expected_remote_q.pop_front();
-
-        if (actual !== expected) begin
-          $error("[%0t] SCOREBOARD FAIL: REMOTE_OUTPUT got=0x%08h expected=0x%08h",
-                 $time, actual, expected);
-          fail_count++;
-        end
-        else begin
-          $display("[%0t] SCOREBOARD PASS: REMOTE_OUTPUT word=0x%08h", $time, actual);
-          pass_count++;
-        end
-      end
+      actual_remote_q.push_back(actual);
+      compare_remote_ready();
     end
   endtask
 
@@ -317,9 +296,18 @@ class bird_scoreboard;
       clear_remote_state();
     end
 
+    compare_local_ready();
+    compare_remote_ready();
+
     if (expected_local_q.size() != 0) begin
       $error("[%0t] SCOREBOARD FAIL: %0d expected local bytes were not produced",
              $time, expected_local_q.size());
+      fail_count++;
+    end
+
+    if (actual_local_q.size() != 0) begin
+      $error("[%0t] SCOREBOARD FAIL: %0d unexpected local bytes were produced",
+             $time, actual_local_q.size());
       fail_count++;
     end
 
@@ -329,13 +317,21 @@ class bird_scoreboard;
       fail_count++;
     end
 
+    if (actual_remote_q.size() != 0) begin
+      $error("[%0t] SCOREBOARD FAIL: %0d unexpected remote words were produced",
+             $time, actual_remote_q.size());
+      fail_count++;
+    end
+
     $display("==============================================");
     $display(" SCOREBOARD SUMMARY");
     $display(" PASS COUNT             = %0d", pass_count);
     $display(" FAIL COUNT             = %0d", fail_count);
     $display(" PREDICTED DROP COUNT   = %0d", predicted_drop_count);
     $display(" PENDING LOCAL BYTES    = %0d", expected_local_q.size());
+    $display(" PENDING LOCAL ACTUAL   = %0d", actual_local_q.size());
     $display(" PENDING REMOTE WORDS   = %0d", expected_remote_q.size());
+    $display(" PENDING REMOTE ACTUAL  = %0d", actual_remote_q.size());
     $display("==============================================");
   endtask
 
