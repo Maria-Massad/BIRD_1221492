@@ -1,44 +1,28 @@
-//=============================================================================
-// File        : bird_input_monitor.sv
-// Project     : BIRD - Birzeit Integrated Router Design
-// Description : Plain SystemVerilog input monitor for BIRD.
-//               Observes accepted input bytes and reconstructs packets.
-//               Sends completed packets to the scoreboard via mailbox.
-//               This file does not use UVM.
-//=============================================================================
-
+import bird_pkg::*;
 `ifndef BIRD_INPUT_MONITOR_SV
 `define BIRD_INPUT_MONITOR_SV
 
 class bird_input_monitor;
 
-  //-------------------------------------------------------------------------
+  
   // Virtual interface handle
-  //-------------------------------------------------------------------------
+  
   virtual bird_if.MONITOR vif;
 
-  //-------------------------------------------------------------------------
+  
   // Mailbox handle: sends reconstructed input packets to scoreboard
-  //-------------------------------------------------------------------------
+  
   mailbox #(bird_packet) input_mbx;
 
-  //-------------------------------------------------------------------------
+  
   // Constructor
-  //-------------------------------------------------------------------------
+  
   function new(virtual bird_if.MONITOR vif, mailbox #(bird_packet) input_mbx);
     this.vif       = vif;
     this.input_mbx = input_mbx;
   endfunction
 
-  //-------------------------------------------------------------------------
-  // Monitor input transfers and reconstruct packets.
-  //
-  // Protocol:
-  //   - cfg is sampled on the very first byte of a new packet (!collecting)
-  //   - bytes arrive: payload_len payload bytes, then CRC_high, then CRC_low
-  //   - when the last CRC byte is seen, the completed packet is put into
-  //     the mailbox for the scoreboard
-  //-------------------------------------------------------------------------
+
   task run();
     bird_packet pkt;
     bit [31:0]  current_cfg;
