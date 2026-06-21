@@ -1,6 +1,3 @@
-cd C:\Users\Admin\Desktop\BIRD
-
-@'
 # BIRD - Birzeit Integrated Router Design
 
 SystemVerilog verification environment for BIRD, a packet-based routing block.
