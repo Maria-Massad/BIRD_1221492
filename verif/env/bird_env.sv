@@ -1,8 +1,4 @@
-//=============================================================================
-// bird_env.sv
-// Environment — infrastructure only, NO test logic
-// Reference: BIRD Functional Specification
-//=============================================================================
+
 `ifndef BIRD_ENV_SV
 `define BIRD_ENV_SV
 
