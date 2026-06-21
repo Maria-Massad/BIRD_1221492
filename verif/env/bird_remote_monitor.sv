@@ -1,24 +1,15 @@
-//=============================================================================
-// File        : bird_remote_monitor.sv
-// Project     : BIRD - Birzeit Integrated Router Design
-// Description : Plain SystemVerilog remote output monitor for BIRD.
-//               Sends each observed 32-bit word to the scoreboard via mailbox.
-//               This file does not use UVM.
-//=============================================================================
+import bird_pkg::*;
+
 
 `ifndef BIRD_REMOTE_MONITOR_SV
 `define BIRD_REMOTE_MONITOR_SV
 
 class bird_remote_monitor;
 
-  //-------------------------------------------------------------------------
-  // Virtual interface handle
-  //-------------------------------------------------------------------------
+ 
   virtual bird_if.MONITOR vif;
 
-  //-------------------------------------------------------------------------
-  // Mailbox handle: sends observed remote output words to scoreboard
-  //-------------------------------------------------------------------------
+  
   mailbox #(bit [31:0]) remote_mbx;
 
   //-------------------------------------------------------------------------
