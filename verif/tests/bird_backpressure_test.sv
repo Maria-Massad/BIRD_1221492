@@ -1,14 +1,3 @@
-// ============================================================
-// bird_backpressure_test.sv
-// Backpressure Test — Ellen
-//
-// Tests spec §3.2:
-//   When local_rdy is deasserted mid-transfer, verifies:
-//   1. Backpressure applied and released correctly
-//   2. All bytes eventually delivered
-//   3. drop_cnt stays 0
-//   4. remote_vld stays 0
-// ============================================================
 `ifndef BIRD_BACKPRESSURE_TEST_SV
 `define BIRD_BACKPRESSURE_TEST_SV
 
@@ -45,15 +34,15 @@ class bird_backpressure_test;
     int          timeout;
     bit [15:0]   drop_cnt_before;
 
-    // clear pipeline from previous tests
+    // Clear any previous output state and keep the local consumer ready.
     vif.driver_cb.local_rdy <= 1;
     @(vif.driver_cb);
 
-    // save drop_cnt baseline
+    // Save the drop counter value before starting this test.
     drop_cnt_before = vif.driver_cb.drop_cnt;
     $display("[BP] drop_cnt baseline = %0d", drop_cnt_before);
 
-    // -- Build packet with payload_len=2 -------------------
+    // Build a valid local packet with payload_len = 2.
     pkt = new();
     pkt.pkt_type    = LOCAL_PKT;
     pkt.seq_num     = 1;
@@ -65,6 +54,7 @@ class bird_backpressure_test;
     pkt.build_cfg();
     pkt.crc16 = bird_packet::compute_crc16(pkt.payload);
 
+    // Expected local output stream is the payload followed by the original CRC16.
     foreach (pkt.payload[i])  expected.push_back(pkt.payload[i]);
     expected.push_back(pkt.crc16[15:8]);
     expected.push_back(pkt.crc16[7:0]);
@@ -72,15 +62,15 @@ class bird_backpressure_test;
     $display("[BP] Expected %0d bytes: AA BB 0x%02h 0x%02h",
              expected.size(), pkt.crc16[15:8], pkt.crc16[7:0]);
 
-    // -- Phase 1: apply backpressure BEFORE sending --------
-    // This forces the DUT to stall its output queue
+    // Apply backpressure before sending the packet.
+    // This checks that the DUT holds valid data when local_rdy is low.
     vif.driver_cb.local_rdy <= 0;
     @(vif.driver_cb);
 
-    // -- Send the packet -----------------------------------
+    // Send the packet to the driver through the mailbox.
     mbx.put(pkt);
 
-    // -- Wait for local_vld to go high --------------------
+    // Wait until the DUT asserts local_vld.
     timeout = 0;
     while (!vif.local_cb.local_vld) begin
       @(vif.local_cb);
@@ -92,30 +82,30 @@ class bird_backpressure_test;
       end
     end
 
-    $display("[BP] local_vld asserted with local_rdy=0 — DUT holding output");
+    $display("[BP] local_vld asserted while local_rdy=0 - DUT is holding output data");
 
-    // -- Check local_vld stays high for 5 cycles ----------
+    // Keep backpressure active for several cycles.
+    // Since local_rdy is low, no output byte should be transferred.
     repeat (5) begin
       @(vif.local_cb);
       if (!vif.local_cb.local_vld)
         $display("[BP] NOTE: local_vld deasserted during backpressure");
-      // no bytes should transfer since local_rdy=0
       if (vif.local_cb.local_rdy)
         $display("[BP] NOTE: local_rdy went high unexpectedly");
     end
 
-    $display("[BP] PASS: backpressure applied — local_rdy=0 held for 5 cycles");
+    $display("[BP] PASS: backpressure held for 5 cycles with local_rdy=0");
     pass_count++;
 
-    // -- Release backpressure -----------------------------
-    $display("[BP] Releasing backpressure (local_rdy=1)");
+    // Release backpressure and allow the DUT to send the local packet.
+    $display("[BP] Releasing backpressure by setting local_rdy=1");
     vif.driver_cb.local_rdy <= 1;
     @(vif.driver_cb);
 
     $display("[BP] PASS: backpressure released");
     pass_count++;
 
-    // -- Capture all bytes after release ------------------
+    // Capture all local output bytes after backpressure is released.
     timeout = 0;
     while (timeout < 50) begin
       @(vif.local_cb);
@@ -128,7 +118,7 @@ class bird_backpressure_test;
       if (!vif.local_cb.local_vld && captured.size() > 0) break;
     end
 
-    // -- Verify size ---------------------------------------
+    // Compare the number of captured bytes with the expected local stream size.
     $display("[BP] Captured %0d bytes, expected %0d",
              captured.size(), expected.size());
 
@@ -138,6 +128,8 @@ class bird_backpressure_test;
       fail_count++;
     end else begin
       bit all_match = 1;
+
+      // Compare each captured byte against the expected payload and CRC bytes.
       foreach (captured[i]) begin
         if (captured[i] !== expected[i]) begin
           $error("[BP] FAIL: byte[%0d] got=0x%02h exp=0x%02h",
@@ -146,13 +138,14 @@ class bird_backpressure_test;
           fail_count++;
         end
       end
+
       if (all_match) begin
-        $display("[BP] PASS: all %0d bytes correct after backpressure", captured.size());
+        $display("[BP] PASS: all %0d bytes are correct after backpressure", captured.size());
         pass_count++;
       end
     end
 
-    // -- drop_cnt check ------------------------------------
+    // A valid local packet should not increment drop_cnt.
     if (vif.driver_cb.drop_cnt !== 0) begin
       $error("[BP] FAIL: drop_cnt=%0d (expected 0)", vif.driver_cb.drop_cnt);
       fail_count++;
@@ -161,7 +154,7 @@ class bird_backpressure_test;
       pass_count++;
     end
 
-    // -- remote_vld check ---------------------------------
+    // This is local traffic, so the remote output must stay inactive.
     if (vif.remote_cb.remote_vld) begin
       $error("[BP] FAIL: remote_vld went high");
       fail_count++;
@@ -170,7 +163,7 @@ class bird_backpressure_test;
       pass_count++;
     end
 
-    // restore
+    // Restore local_rdy to the default ready state.
     vif.driver_cb.local_rdy <= 1;
 
   endtask
