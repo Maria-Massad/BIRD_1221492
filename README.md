@@ -58,12 +58,7 @@ BIRD/
 │   │   └── bird_if.sv
 │   │
 │   ├── seq/
-│   │   ├── bird_base_seq.sv
-│   │   ├── bird_local_seq.sv
-│   │   ├── bird_remote_seq.sv
 │   │   ├── bird_random_seq.sv
-│   │   ├── bird_drop_seq.sv
-│   │   └── bird_backpressure_seq.sv
 │   │
 │   ├── tb/
 │   │   └── bird_tb.sv
