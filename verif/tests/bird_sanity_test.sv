@@ -47,7 +47,7 @@ class bird_sanity_test;
     pkt.pkt_type    = LOCAL_PKT;
     pkt.seq_num     = 1;          // must be 1 for local (DUT rule)
     pkt.frag_num    = 1;          // must be 1 for local (DUT rule)
-    pkt.payload_len = 4;          // 4 bytes — easy to verify
+    pkt.payload_len = 4;          // 4 bytes â€” easy to verify
     pkt.payload     = new[4];
     pkt.payload[0]  = 8'hAA;
     pkt.payload[1]  = 8'hBB;
@@ -118,7 +118,7 @@ class bird_sanity_test;
  
     // check size
     if (captured.size() !== expected.size()) begin
-      $error("[SANITY] FAIL: size mismatch — got %0d expected %0d",
+      $error("[SANITY] FAIL: size mismatch â€” got %0d expected %0d",
              captured.size(), expected.size());
       return;
     end
