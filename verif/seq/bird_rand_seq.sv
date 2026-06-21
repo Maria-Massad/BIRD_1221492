@@ -1,4 +1,4 @@
-RD_RAND_SEQ_SV
+`ifndef BIRD_RAND_SEQ_SV
 `define BIRD_RAND_SEQ_SV
 
 `include "bird_pkg.sv"
