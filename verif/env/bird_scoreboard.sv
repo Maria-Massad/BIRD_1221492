@@ -1,3 +1,4 @@
+import bird_pkg::*;
 `ifndef BIRD_SCOREBOARD_SV
 `define BIRD_SCOREBOARD_SV
 
@@ -35,6 +36,16 @@ class bird_scoreboard;
     pass_count            = 0;
     fail_count            = 0;
     predicted_drop_count  = 0;
+    clear_remote_state();
+  endfunction
+
+
+  function void clear();
+    expected_local_q.delete();
+    actual_local_q.delete();
+    expected_remote_q.delete();
+    actual_remote_q.delete();
+    predicted_drop_count = 0;
     clear_remote_state();
   endfunction
 
@@ -214,6 +225,10 @@ class bird_scoreboard;
       start_remote_packet(pkt.seq_num);
     end
     else if (pkt.seq_num != active_seq) begin
+      // Spec section 8.1: a packet is dropped when a fragment arrives with a
+      // mismatched SEQ_NUM while another remote packet is being accumulated.
+      // Count one drop for the affected incomplete packet. Do not add an extra
+      // drop just to make the model match a specific DUT implementation.
       predict_packet_drop("mismatched SEQ_NUM while previous remote packet is incomplete");
       clear_remote_state();
 
@@ -221,7 +236,8 @@ class bird_scoreboard;
         start_remote_packet(pkt.seq_num);
       end
       else begin
-        predict_packet_drop("new remote packet did not start at FRAG_NUM 1 after previous drop");
+        // The incoming fragment cannot start a new accumulated packet because
+        // it is not FRAG_NUM 1. Ignore it after the previous packet drop.
         return;
       end
     end
@@ -290,7 +306,7 @@ class bird_scoreboard;
     join_none
   endtask
 
-  task report();
+  function void report();
     if (remote_active) begin
       predict_packet_drop("simulation ended while remote packet was still incomplete");
       clear_remote_state();
@@ -333,7 +349,7 @@ class bird_scoreboard;
     $display(" PENDING REMOTE WORDS   = %0d", expected_remote_q.size());
     $display(" PENDING REMOTE ACTUAL  = %0d", actual_remote_q.size());
     $display("==============================================");
-  endtask
+  endfunction
 
 endclass : bird_scoreboard
 
