@@ -1,29 +1,29 @@
 import bird_pkg::*;
-
-
 `ifndef BIRD_REMOTE_MONITOR_SV
 `define BIRD_REMOTE_MONITOR_SV
 
 class bird_remote_monitor;
 
+  // Virtual interface handle
  
   virtual bird_if.MONITOR vif;
 
   
+  // Mailbox handle: sends observed remote output words to scoreboard
+  
   mailbox #(bit [31:0]) remote_mbx;
 
-  //-------------------------------------------------------------------------
   // Constructor
-  //-------------------------------------------------------------------------
+  
   function new(virtual bird_if.MONITOR vif, mailbox #(bit [31:0]) remote_mbx);
     this.vif        = vif;
     this.remote_mbx = remote_mbx;
   endfunction
 
-  //-------------------------------------------------------------------------
+  
   // Monitor remote output transfers
   // A transfer is accepted when remote_vld = 1 and remote_rdy = 1.
-  //-------------------------------------------------------------------------
+  
   task run();
     $display("[%0t] REMOTE_MONITOR: Started", $time);
 
