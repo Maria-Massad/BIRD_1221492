@@ -37,7 +37,7 @@ class bird_packet;
   endfunction
 
 
-  // Basic valid packet fields — spec Section 5
+  // Basic valid packet fields â€” spec Section 5
   constraint c_valid_basic {
     payload_len inside {[8'd1:8'd255]};
     frag_num    inside {[5'd1:5'd31]};
@@ -49,7 +49,7 @@ class bird_packet;
   }
 
 
-  // Spec Section 6 — Local Traffic Processing:
+  // Spec Section 6 â€” Local Traffic Processing:
   //   "FRAG_NUM shall be equal to 1."
   //   "SEQ_NUM identifies the packet but has no functional impact
   //    on local routing."
@@ -64,7 +64,7 @@ class bird_packet;
   }
 
 
-  // build_cfg() — pack fields into 32-bit cfg word
+  // build_cfg() â€” pack fields into 32-bit cfg word
   // Bit layout from spec Section 5:
   //   [0]     traffic_type
   //   [7:1]   rsvd_7_1
@@ -87,7 +87,7 @@ class bird_packet;
   endfunction
 
   //-------------------------------------------------------------------------
-  // calculate_crc16() — CRC16-CCITT
+  // calculate_crc16() â€” CRC16-CCITT
   // Polynomial: 0x1021, Init: 0xFFFF
   // MSB of each byte processed first (byte XORed into top 8 bits of CRC)
   //-------------------------------------------------------------------------
@@ -107,7 +107,7 @@ class bird_packet;
   endfunction
 
   //-------------------------------------------------------------------------
-  // finalize_packet() — call after setting all fields manually
+  // finalize_packet() â€” call after setting all fields manually
   // Builds cfg word and computes CRC16
   //-------------------------------------------------------------------------
   function void finalize_packet();
@@ -123,7 +123,7 @@ class bird_packet;
   endfunction
 
 
-  // make_local() — directed local packet.
+  // make_local() â€” directed local packet.
   // sequence_number is accepted as given, with no enforced value,
   // per spec Section 6 ("SEQ_NUM... has no functional impact on
   // local routing"). frag_num is always forced to 1 per spec.
@@ -144,7 +144,7 @@ class bird_packet;
   endfunction
 
 
-  // make_remote_fragment() — directed remote fragment
+  // make_remote_fragment() â€” directed remote fragment
 
   function void make_remote_fragment(
     input bit [4:0]      sequence_number,
@@ -164,7 +164,7 @@ class bird_packet;
   endfunction
 
 
-  // Invalid packet helpers — for drop tests, per spec Section 8.1
+  // Invalid packet helpers â€” for drop tests, per spec Section 8.1
 
   function void make_invalid_seq_zero(input byte unsigned data[]);
     make_local(5'd1, data);
@@ -186,7 +186,7 @@ class bird_packet;
     rsvd_7_1     = 7'd0;
     rsvd_23_21   = 3'd0;
     rsvd_31_29   = 3'd0;
-    payload      = new[0]; // empty — driver sends 0 bytes
+    payload      = new[0]; // empty â€” driver sends 0 bytes
     finalize_packet();
   endfunction
 
@@ -197,7 +197,7 @@ class bird_packet;
   endfunction
 
 
-  // print() — debug display
+  // print() â€” debug display
 
   function void print(string tag = "BIRD_PACKET");
     $display("[%0t] %s", $time, tag);
@@ -219,7 +219,7 @@ class bird_packet;
   
   
   
-  // compute_crc16_q — called by scoreboard
+  // compute_crc16_q â€” called by scoreboard
   // takes a queue instead of array
   static function bit [15:0] compute_crc16_q(
     input byte unsigned payload_q[$]
