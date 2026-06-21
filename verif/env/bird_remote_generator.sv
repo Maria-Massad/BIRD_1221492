@@ -1,3 +1,4 @@
+import bird_pkg::*;
 `ifndef BIRD_REMOTE_GENERATOR_SV
 `define BIRD_REMOTE_GENERATOR_SV
 
@@ -31,9 +32,11 @@ class bird_remote_generator;
 
     pkt = new();
 
-    data = new[2];
+    data = new[4];
     data[0] = 8'hAA;
     data[1] = 8'hBB;
+    data[2] = 8'hCC;
+    data[3] = 8'hDD;
 
     pkt.make_remote_fragment(5'd5, 5'd1, data);
 
@@ -47,9 +50,11 @@ class bird_remote_generator;
 
     pkt = new();
 
-    data = new[2];
-    data[0] = 8'hCC;
-    data[1] = 8'hDD;
+    data = new[4];
+    data[0] = 8'hEE;
+    data[1] = 8'hFF;
+    data[2] = 8'h11;
+    data[3] = 8'h22;
 
     pkt.make_remote_fragment(5'd5, 5'd2, data);
 
