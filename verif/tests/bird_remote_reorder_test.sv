@@ -1,7 +1,4 @@
-//=============================================================================
-// bird_remote_reorder_test.sv — M2
-// Tests remote fragment reordering — spec section 7.2
-//=============================================================================
+import bird_pkg::*;
 `ifndef BIRD_REMOTE_REORDER_TEST_SV
 `define BIRD_REMOTE_REORDER_TEST_SV
 
