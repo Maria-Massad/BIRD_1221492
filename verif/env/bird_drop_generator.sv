@@ -1,3 +1,5 @@
+import bird_pkg::*;
+
 `ifndef BIRD_DROP_GENERATOR_SV
 `define BIRD_DROP_GENERATOR_SV
 
@@ -6,14 +8,14 @@ class bird_drop_generator;
   function new();
   endfunction
 
-  //small payload used by invalid pkts
+  // Small payload used by invalid packets
   function void build_small_payload(output byte unsigned data[]);
     data = new[2];
     data[0] = 8'hDE;
     data[1] = 8'hAD;
   endfunction
 
-  //invalid pkt seq_num=0
+  // Invalid packet: seq_num = 0
   function bird_packet create_seq_zero_packet();
     bird_packet pkt;
     byte unsigned data[];
@@ -26,7 +28,7 @@ class bird_drop_generator;
     return pkt;
   endfunction
 
-  //invalid pkt frag_num=0
+  // Invalid packet: frag_num = 0
   function bird_packet create_frag_zero_packet();
     bird_packet pkt;
     byte unsigned data[];
@@ -39,7 +41,7 @@ class bird_drop_generator;
     return pkt;
   endfunction
 
-  //invalid pkt payload_len=0
+  // Invalid packet: payload_len = 0
   function bird_packet create_payload_len_zero_packet();
     bird_packet pkt;
 
@@ -49,7 +51,7 @@ class bird_drop_generator;
     return pkt;
   endfunction
 
-  //invalid pkt reserved bits non zero
+  // Invalid packet: reserved bits are non-zero
   function bird_packet create_reserved_bits_packet();
     bird_packet pkt;
     byte unsigned data[];
@@ -62,7 +64,7 @@ class bird_drop_generator;
     return pkt;
   endfunction
 
-  //invalid local pkt, frag_num forced to 2 instead of 1
+  // Invalid local packet: frag_num forced to 2 instead of 1
   function bird_packet create_local_invalid_frag_packet();
     bird_packet pkt;
     byte unsigned data[];
@@ -81,7 +83,9 @@ class bird_drop_generator;
     return pkt;
   endfunction
 
-  //invalid remote seq mismatch, frag1 seq=7 then frag2 seq=8
+  // Invalid remote SEQ mismatch:
+  // seq=7 fragment starts accumulation, then seq=8 fragment arrives while
+  // the seq=7 packet is still incomplete.
   function void create_remote_seq_mismatch_pair(
     output bird_packet frag1,
     output bird_packet frag2
@@ -104,7 +108,8 @@ class bird_drop_generator;
     frag2.make_remote_fragment(5'd8, 5'd2, data2);
   endfunction
 
-  //invalid remote missing fragment, frag1 and frag3 sent, frag2 never sent
+  // Invalid remote missing fragment:
+  // frag1 and frag3 are sent, but frag2 is never sent.
   function void create_remote_missing_fragment_pair(
     output bird_packet frag1,
     output bird_packet frag3
@@ -115,19 +120,24 @@ class bird_drop_generator;
     frag1 = new();
     frag3 = new();
 
-    data1 = new[2];
+    data1 = new[4];
     data1[0] = 8'hC1;
     data1[1] = 8'hC2;
+    data1[2] = 8'hC3;
+    data1[3] = 8'hC4;
 
-    data3 = new[2];
-    data3[0] = 8'hC3;
-    data3[1] = 8'hC4;
+    data3 = new[4];
+    data3[0] = 8'hC5;
+    data3[1] = 8'hC6;
+    data3[2] = 8'hC7;
+    data3[3] = 8'hC8;
 
     frag1.make_remote_fragment(5'd9, 5'd1, data1);
     frag3.make_remote_fragment(5'd9, 5'd3, data3);
   endfunction
 
-  //invalid remote, new frag1 arrives while old seq still incomplete
+  // Invalid remote:
+  // A new frag1 arrives while an old sequence is still incomplete.
   function void create_remote_frag1_while_incomplete_pair(
     output bird_packet old_frag1,
     output bird_packet new_frag1
